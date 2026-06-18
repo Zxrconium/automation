@@ -2,6 +2,7 @@
 import logging
 import re
 import time
+from pathlib import Path
 from typing import List, Optional
 from urllib.parse import urljoin
 
@@ -17,6 +18,10 @@ logger = logging.getLogger("ungc.participants")
 
 DEFAULT_URL = "https://unglobalcompact.org.au/our-participants/"
 
+class FetchBlockedError(Exception):
+    """Raised when the remote server returns 403 or similar access-denied response."""
+
+
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=2, max=8))
 def _fetch(url: str) -> str:
     cached = cache_module.get(f"page:{url}", settings.cache_ttl_hours)
@@ -26,18 +31,43 @@ def _fetch(url: str) -> str:
     headers = {"User-Agent": settings.user_agent}
     with httpx.Client(timeout=30, follow_redirects=True) as client:
         r = client.get(url, headers=headers)
+        if r.status_code == 403:
+            raise FetchBlockedError(
+                f"HTTP 403 Forbidden from {url}. "
+                "The website blocked automated fetching. "
+                "Open the page in a browser, save it as HTML, "
+                "then rerun with --html-file."
+            )
         r.raise_for_status()
     cache_module.set(f"page:{url}", r.text)
     return r.text
 
 
-def parse_participants(url: str = DEFAULT_URL, category_filter: Optional[str] = None) -> List[Participant]:
+def _html_from_file(html_file: str) -> str:
+    path = Path(html_file)
+    if not path.exists():
+        raise FileNotFoundError(f"HTML file not found: {html_file}")
+    logger.info(f"Reading participants from local file: {html_file}")
+    return path.read_text(encoding="utf-8", errors="replace")
+
+
+def parse_participants(
+    url: str = DEFAULT_URL,
+    category_filter: Optional[str] = None,
+    html_file: Optional[str] = None,
+) -> List[Participant]:
     """
     Parse the UNGC AU participants page.
+    Pass html_file to read from a locally saved HTML file instead of fetching the URL.
     The page uses headings (h2/h3/h4) to separate categories, followed by lists of companies.
     """
-    logger.info(f"Fetching participants from {url}")
-    html = _fetch(url)
+    base_url = url  # used for resolving relative hrefs
+    if html_file:
+        html = _html_from_file(html_file)
+    else:
+        logger.info(f"Fetching participants from {url}")
+        html = _fetch(url)
+
     soup = BeautifulSoup(html, "lxml")
 
     participants: List[Participant] = []
@@ -68,7 +98,7 @@ def parse_participants(url: str = DEFAULT_URL, category_filter: Optional[str] = 
                     name = a.get_text(strip=True)
                     href = a.get("href", "")
                     if href and not href.startswith("#"):
-                        link = urljoin(url, href)
+                        link = urljoin(base_url, href)
                 if not name:
                     continue
                 cat = current_category

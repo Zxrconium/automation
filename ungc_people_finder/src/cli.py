@@ -12,7 +12,7 @@ import pandas as pd
 from src.logging_config import setup_logging
 from src.config import settings
 from src.models import ResearchResult, StatusEnum
-from src.participants import parse_participants, save_participants_csv
+from src.participants import parse_participants, save_participants_csv, FetchBlockedError
 from src.search import get_provider
 from src.company_domain import discover_domain
 from src.people_research import research_people
@@ -34,9 +34,31 @@ def collect_participants(
     url: str = typer.Option(UNGC_URL, help="UNGC participants page URL"),
     category: Optional[str] = typer.Option(None, help="Filter by category, e.g. 'Business'"),
     output: str = typer.Option("data/output/participants.csv", help="Output CSV path"),
+    html_file: Optional[str] = typer.Option(
+        None,
+        help="Path to a locally saved HTML file. Use this if the site blocks automated fetching.",
+    ),
 ):
-    """Collect participant companies from the UNGC AU website."""
-    participants = parse_participants(url, category_filter=category)
+    """Collect participant companies from the UNGC AU website.
+
+    If the site blocks automated access (HTTP 403), save the page manually in
+    your browser (File → Save As → Webpage, HTML Only) and pass the saved file
+    with --html-file.
+    """
+    try:
+        participants = parse_participants(url, category_filter=category, html_file=html_file)
+    except FetchBlockedError as e:
+        typer.echo(f"\nError: {e}", err=True)
+        typer.echo(
+            "\nFix: open the URL in your browser, save the page as HTML (File → Save As → "
+            "Webpage, HTML Only), then rerun:\n"
+            f"  python -m src.cli collect-participants "
+            f"--html-file data/input/ungc_participants.html"
+            + (f" --category {category}" if category else "")
+            + f" --output {output}",
+            err=True,
+        )
+        raise typer.Exit(1)
     save_participants_csv(participants, output)
     typer.echo(f"Collected {len(participants)} participants → {output}")
 

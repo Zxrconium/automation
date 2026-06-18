@@ -97,6 +97,25 @@ python -m src.cli collect-participants --output data/output/participants.csv
 python -m src.cli collect-participants --category "Business" --output data/output/business.csv
 ```
 
+#### If the site blocks automated fetching (HTTP 403)
+
+Some websites return 403 Forbidden to automated requests. In that case:
+
+1. Open the participants page in your browser:
+   `https://unglobalcompact.org.au/our-participants/`
+2. Save the page as HTML: **File → Save As → Webpage, HTML Only**
+3. Place the file at `data/input/ungc_participants.html`
+4. Rerun with `--html-file`:
+
+```bash
+python -m src.cli collect-participants \
+  --html-file data/input/ungc_participants.html \
+  --category Business \
+  --output data/output/participants.csv
+```
+
+The tool will print a clear message with these instructions if a 403 is encountered.
+
 ### Step 2: Enrich with People executive data
 
 ```bash
